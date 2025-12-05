@@ -1,0 +1,107 @@
+import os
+import random
+
+def read_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def build(files, target, min_chunk=4):
+    """
+    Берем кусок из каждого произведения.
+    Размер куска пропорционален размеру произведения, но не меньше min_chunk.
+    """
+
+    target_bytes = target * 1024
+    min_chunk_bytes = min_chunk * 1024
+
+    # длины произведений
+    lengths = {name: len(text.encode("utf-8")) for name, text in files.items()}
+    total = sum(lengths.values())
+
+    # считаем пропорции
+    props = {}
+    for name, L in lengths.items():
+        # доля
+        prop = L / total
+        
+        size = int(prop * target_bytes)
+        size = max(size, min_chunk_bytes)
+        size = min(size, int(L * 0.9))
+
+        props[name] = size
+
+    # если сумма > target_bytes, то уменьшаем
+    sum_sizes = sum(props.values())
+    if sum_sizes > target_bytes:
+        ratio = target_bytes / sum_sizes
+        for name in props:
+            props[name] = max(min_chunk_bytes, int(props[name] * ratio))
+
+    output_chunks = []
+    for name, text in files.items():
+        byte_text = text.encode("utf-8")
+        L = len(byte_text)
+        need = props[name]
+
+        if need >= L:
+            chunk = text.strip()
+        else:
+            # выбираем случайную стартовую позицию
+            start = random.randint(0, L - need)
+            sub = byte_text[start:start+need].decode("utf-8", errors="ignore")
+
+            # перенос начала до ближайшего абзаца
+            idx = sub.find("\n\n")
+            if idx != -1:
+                sub = sub[idx+2:]
+            chunk = sub.strip()
+
+        output_chunks.append(chunk)
+
+    return "\n\n".join(output_chunks)
+
+
+def process(raw, train_kb, test_kb):
+    raw_fold = f"./data/raw/{raw}"
+    out = f"./data/processed/{raw}"
+    
+    os.makedirs(out, exist_ok=True)
+
+    # собираем все произведения
+    files = {}
+    for i in os.listdir(raw_fold):
+        if i.endswith(".txt"):
+            path = os.path.join(raw_fold, i)
+            files[i] = read_file(path)
+
+    if len(files) < 2:
+        raise ValueError("Нужно хотя бы 2 произведения")
+
+    # делим произведения на train и test
+    titles = list(files.keys())
+    random.shuffle(titles)
+
+    split_point = len(titles) * 2 // 3  # 2/3 произведений кидаем в train, чтоб он был разнообразнее
+    
+    train_titles = titles[:split_point]
+    test_titles  = titles[split_point:]
+
+    train_files = {t: files[t] for t in train_titles}
+    test_files  = {t: files[t] for t in test_titles}
+
+    # генерируем train/test
+    train_text = build(train_files, train_kb)
+    test_text  = build(test_files,  test_kb)
+
+    # сохраняем
+    with open(os.path.join(out, "Train.txt"), "w", encoding="utf-8") as f:
+        f.write(train_text)
+
+    with open(os.path.join(out, "Test.txt"), "w", encoding="utf-8") as f:
+        f.write(test_text)
+
+    print(f"Готово! Сохранено в папке {out}")
+    print(f"В train попали: {train_titles}")
+    print(f"В test: {test_titles}")
+
+process("Pasternak", train_kb=128, test_kb=128)
