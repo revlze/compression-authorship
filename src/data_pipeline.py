@@ -3,18 +3,13 @@ import random
 
 seed = 2025
 
-def read_file(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+random.seed(seed)
 
 def build(files, target, min_chunk=4):
     """
     Берем кусок из каждого произведения.
     Размер куска пропорционален размеру произведения, но не меньше min_chunk.
     """
-
-    random.seed(seed)
-
     target_bytes = target * 1024
     min_chunk_bytes = min_chunk * 1024
 
@@ -46,13 +41,13 @@ def build(files, target, min_chunk=4):
             props[name] = max(min_chunk_bytes, int(props[name] * ratio))
 
     output_chunks = []
-    for name, text in files.items():
-        byte_text = text.encode("utf-8")
+    for name, byte_text in byte_files.items():
         L = len(byte_text)
         need = props[name]
 
         if need >= L:
-            chunk = text.strip()
+            chunk = files[name].strip()
+
         else:
             # выбираем случайную стартовую позицию
             start = random.randint(0, L - need)
@@ -70,12 +65,13 @@ def build(files, target, min_chunk=4):
 
 
 def process(author_name, train_kb, test_kb):
-    random.seed(seed)
-
     raw_fold = Path(f"data/raw/{author_name}")
     processed_fold = Path(f"data/processed/{author_name}")
-    
-    processed_fold.mkdir(exist_ok=True)
+
+    if not raw_fold.exists():
+        raise FileNotFoundError(f"Папка с исходниками не найдена: {raw_fold}, советую проверить имя автора")
+
+    processed_fold.mkdir(parents=True, exist_ok=True)
 
     # собираем все произведения в словарь {title : full_text}
     list_txt_files = list(raw_fold.glob('*.txt'))
@@ -83,7 +79,7 @@ def process(author_name, train_kb, test_kb):
 
     # проверка кол-ва файлов
     if len(txt_files) < 2:
-        raise ValueError("Нужно хотя бы 2 произведения")
+        raise ValueError(f"Нужно хотя бы 2 произведения, найдено {len(txt_files)}")
 
     # делим произведения на train и test
     titles = list(txt_files.keys())
