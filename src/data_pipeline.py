@@ -1,5 +1,7 @@
-import os
+from pathlib import Path
 import random
+
+seed = 2025
 
 def read_file(path):
     with open(path, "r", encoding="utf-8") as f:
@@ -11,11 +13,17 @@ def build(files, target, min_chunk=4):
     Размер куска пропорционален размеру произведения, но не меньше min_chunk.
     """
 
+    random.seed(seed)
+
     target_bytes = target * 1024
     min_chunk_bytes = min_chunk * 1024
 
+
+    # все в байты перевел
+    byte_files = {name: text.encode("utf-8") for name, text in files.items()}
+
     # длины произведений
-    lengths = {name: len(text.encode("utf-8")) for name, text in files.items()}
+    lengths = {name: len(byte_text) for name, byte_text in byte_files.items()}
     total = sum(lengths.values())
 
     # считаем пропорции
@@ -61,24 +69,24 @@ def build(files, target, min_chunk=4):
     return "\n\n".join(output_chunks)
 
 
-def process(raw, train_kb, test_kb):
-    raw_fold = f"./data/raw/{raw}"
-    out = f"./data/processed/{raw}"
+def process(author_name, train_kb, test_kb):
+    random.seed(seed)
+
+    raw_fold = Path(f"data/raw/{author_name}")
+    processed_fold = Path(f"data/processed/{author_name}")
     
-    os.makedirs(out, exist_ok=True)
+    processed_fold.mkdir(exist_ok=True)
 
-    # собираем все произведения
-    files = {}
-    for i in os.listdir(raw_fold):
-        if i.endswith(".txt"):
-            path = os.path.join(raw_fold, i)
-            files[i] = read_file(path)
+    # собираем все произведения в словарь {title : full_text}
+    list_txt_files = list(raw_fold.glob('*.txt'))
+    txt_files = {path.stem: path.read_text(encoding='utf-8') for path in list_txt_files}
 
-    if len(files) < 2:
+    # проверка кол-ва файлов
+    if len(txt_files) < 2:
         raise ValueError("Нужно хотя бы 2 произведения")
 
     # делим произведения на train и test
-    titles = list(files.keys())
+    titles = list(txt_files.keys())
     random.shuffle(titles)
 
     split_point = len(titles) * 2 // 3  # 2/3 произведений кидаем в train, чтоб он был разнообразнее
@@ -86,21 +94,25 @@ def process(raw, train_kb, test_kb):
     train_titles = titles[:split_point]
     test_titles  = titles[split_point:]
 
-    train_files = {t: files[t] for t in train_titles}
-    test_files  = {t: files[t] for t in test_titles}
+    train_files = {t: txt_files[t] for t in train_titles}
+    test_files  = {t: txt_files[t] for t in test_titles}
 
     # генерируем train/test
     train_text = build(train_files, train_kb)
     test_text  = build(test_files,  test_kb)
 
+    # пути до train/test
+    train_path = processed_fold / 'Train.txt'
+    test_path = processed_fold / "Test.txt"
+
     # сохраняем
-    with open(os.path.join(out, "Train.txt"), "w", encoding="utf-8") as f:
+    with open(train_path, "w", encoding="utf-8") as f:
         f.write(train_text)
 
-    with open(os.path.join(out, "Test.txt"), "w", encoding="utf-8") as f:
+    with open(test_path, "w", encoding="utf-8") as f:
         f.write(test_text)
 
-    print(f"Готово! Сохранено в папке {out}")
+    print(f"Готово! Сохранено в папке {processed_fold}")
     print(f"В train попали: {train_titles}")
     print(f"В test: {test_titles}")
 
