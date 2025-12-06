@@ -7,8 +7,13 @@
 ├── requirements.txt
 │
 ├── data/
-│   ├── raw/{name_author,...}           # Сырые тексты авторов
-│   └── processed/{name_author,...}     # Очищенные/нарезанные тексты
+│   ├── raw/{author_name}/              # Сырые тексты авторов
+│   └── processed/
+│       └── {author_name}/
+│           └── {case}_{punct}_{stop}/  # Варианты предобработки
+│               ├── Train.txt
+│               ├── Test.txt
+│               └── meta.json
 │
 └── src/
     ├── theory.py          # Реализация метрик/расстояний через сжатие
