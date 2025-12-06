@@ -1,8 +1,18 @@
 from pathlib import Path
-from nltk.corpus import stopwords
 import random
 import json
 import re
+
+try:
+    from nltk.corpus import stopwords
+    STOPWORDS_RU_ENG: set[str] = set(stopwords.words('russian')) | set(stopwords.words('english'))
+except LookupError:
+    import warnings
+    warnings.warn(
+        "NLTK stopwords not found. Run: import nltk; nltk.download('stopwords'). "
+        "remove_stopwords=True will raise an error."
+    )
+    STOPWORDS_RU_ENG = set()
 
 # === Некоторые константы для регулярок ====
 
@@ -40,11 +50,7 @@ RE_UPPER_LINE = re.compile(
 
 
 
-# === стоп-слова из NLTK (русский) ===
-# ВАЖНО: один раз в окружении сделай:
-#   import nltk
-#   nltk.download('stopwords')
-STOPWORDS_RU_ENG: set[str] = set(stopwords.words('russian')) | set(stopwords.words('english'))
+
 
 
 def clean_text(text: str) -> str:
@@ -124,67 +130,85 @@ def preprocess_text(
     return result.strip()
 
 
-def build(files, target_kb, min_chunk_kb=4, rng=None):
+def build(
+    files: dict[str, str],
+    target_kb: int | float,
+    min_chunk_kb: int | float = 4,
+    rng: random.Random | None = None,
+) -> str:
     """
     Собирает смесь кусков из произведений.
     Размер куска пропорционален длине произведения.
     Для длинных произведений размер не меньше min_chunk_kb.
     Для коротких произведений берётся текст целиком.
     
-    Работаем с символами (не байтами), чтобы не резать UTF-8 посередине.
+    Использует реальный размер в байтах (UTF-8) для точности.
     """
     if rng is None:
-        rng = random
+        rng = random.Random()
 
-    # Переводим target в символы (примерно: 1 кириллический символ ≈ 2 байта UTF-8)
-    # Но лучше работать напрямую с символами
-    target_chars = target_kb * 512  # примерная оценка для кириллицы
-    min_chunk_chars = min_chunk_kb * 512
+    if not files:
+        return ""
 
-    # длины произведений в символах
-    lengths = {name: len(text) for name, text in files.items()}
+    # Используем реальный размер в байтах для точности
+    target_bytes = target_kb * 1024
+    min_chunk_bytes = min_chunk_kb * 1024
+
+    # длины произведений в байтах (UTF-8)
+    lengths: dict[str, int] = {name: len(text.encode('utf-8')) for name, text in files.items()}
     total = sum(lengths.values())
 
-    # считаем пропорции (сколько символов брать из каждого произведения)
-    props = {}
+    if total == 0:
+        return ""
+
+    # считаем пропорции (сколько байтов брать из каждого произведения)
+    props: dict[str, int] = {}
     for name, L in lengths.items():
-        if L <= min_chunk_chars:
+        if L <= min_chunk_bytes:
             # короткое произведение — берём целиком
             size = L
         else:
             # доля
             prop = L / total
-            size = int(prop * target_chars)
-            size = max(size, min_chunk_chars)
+            size = int(prop * target_bytes)
+            size = max(size, int(min_chunk_bytes))
             size = min(size, int(L * 0.9))
 
         props[name] = size
 
-    # если сумма > target_chars, то уменьшаем
+    # если сумма > target_bytes, то уменьшаем
     sum_sizes = sum(props.values())
-    if sum_sizes > target_chars:
-        ratio = target_chars / sum_sizes
+    if sum_sizes > target_bytes:
+        ratio = target_bytes / sum_sizes
         for name, size in list(props.items()):
             L = lengths[name]
-            if L <= min_chunk_chars:
+            if L <= min_chunk_bytes:
                 # короткие тексты не трогаем
                 props[name] = L
             else:
                 new_size = int(size * ratio)
-                new_size = max(min_chunk_chars, min(new_size, int(L * 0.9)))
+                new_size = max(int(min_chunk_bytes), min(new_size, int(L * 0.9)))
                 props[name] = new_size
 
-    output_chunks = []
+    output_chunks: list[str] = []
     for name, text in files.items():
-        L = len(text)
+        text_bytes = len(text.encode('utf-8'))
         need = props[name]
 
-        if need >= L:
+        if need >= text_bytes:
             chunk = text.strip()
         else:
+            # Оценочное соотношение байты/символы для этого текста
+            bytes_per_char = text_bytes / len(text) if text else 1
+            need_chars = int(need / bytes_per_char)
+            
+            L = len(text)
+            need_chars = min(need_chars, L)
+            
             # выбираем случайную стартовую позицию (в символах)
-            start = rng.randint(0, L - need)
-            sub = text[start:start + need]
+            max_start = max(0, L - need_chars)
+            start = rng.randint(0, max_start) if max_start > 0 else 0
+            sub = text[start:start + need_chars]
 
             # обрезаем начало до ближайшего переноса строки (начало абзаца/предложения)
             first_newline = sub.find("\n")
@@ -192,28 +216,34 @@ def build(files, target_kb, min_chunk_kb=4, rng=None):
                 sub = sub[first_newline + 1:]
 
             # обрезаем конец до ближайшего переноса строки (конец абзаца/предложения)
+            # ВАЖНО: пересчитываем позицию после первой обрезки
             last_newline = sub.rfind("\n")
             if last_newline != -1 and last_newline > len(sub) * 3 // 4:
                 sub = sub[:last_newline]
 
-            # если не нашли переносы, пробуем обрезать по точке/восклицательному/вопросительному
+            # если не нашли перенос в начале, пробуем обрезать по точке/восклицательному/вопросительному
             if first_newline == -1:
-                for sep in ". ", "! ", "? ":
+                current_len = len(sub)
+                for sep in (". ", "! ", "? "):
                     idx = sub.find(sep)
-                    if idx != -1 and idx < len(sub) // 4:
+                    if idx != -1 and idx < current_len // 4:
                         sub = sub[idx + 2:]
                         break
 
+            # если не нашли перенос в конце, пробуем обрезать по точке
+            # ВАЖНО: пересчитываем после возможной обрезки начала
             if last_newline == -1:
-                for sep in ". ", "! ", "? ":
+                current_len = len(sub)
+                for sep in (". ", "! ", "? "):
                     idx = sub.rfind(sep)
-                    if idx != -1 and idx > len(sub) * 3 // 4:
+                    if idx != -1 and idx > current_len * 3 // 4:
                         sub = sub[:idx + 1]
                         break
 
             chunk = sub.strip()
 
-        output_chunks.append(chunk)
+        if chunk:  # добавляем только непустые чанки
+            output_chunks.append(chunk)
 
     result = "\n\n".join(output_chunks)
     # нормализуем пустые строки
@@ -310,7 +340,7 @@ def process(
         "lowercase": lowercase,
         "remove_punct": remove_punct,
         "remove_stopwords": remove_stopwords,
-        "stopwords_source": "nltk.russian",
+        "stopwords_source": "nltk.russian and nltk.english",
         "config_name": cfg_name,
     }
 
@@ -329,7 +359,7 @@ def process(
 
 # ===== Запуск 8 конфигураций =====
 
-author = "Pasternak"
+author = "Gorky"
 
 configs = [
     # Without punctuation, without stop-words, without capital letters
