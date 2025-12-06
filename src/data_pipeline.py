@@ -19,27 +19,58 @@ RE_MANY_EMPTY_LINES = re.compile(r'\n[ \t]*\n[ \t]*\n+')
 TOKEN_RE = re.compile(r'(\w+|\s+|[^\w\s])', flags=re.UNICODE)
 WORD_RE  = re.compile(r'^\w+$', flags=re.UNICODE)
 
+# строка, состоящая только из номера главы (арабская или римская), опционально с точкой
+RE_CHAPTER_HEADING = re.compile(
+    r'(?m)^[ \t\u00A0]*(\d+|[ivxlcdmIVXLCDM]{1,6})[ \t\u00A0]*\.?[ \t\u00A0]*$'
+)
+
+# ссылки по типу [7], [2], также не лезем во внутрь слова, типо 'слово[7]слово' --- не матчится 'слово[7]' --- матчится
+RE_LINKS = re.compile(r'\[\d+\](?!\w)')
+
+# какой-то мусор "_____" и двойные тире "--"
+RE_TRASH = re.compile(r'_+|--')
+
+# примечания всякие "* дааддаа"
+RE_STAR_LINE = re.compile(r'(?m)^[ \t]*\*.*$')
+
+# строки-заголовки полностью из ЗАГЛАВНЫХ (рус/лат), цифр и знаков
+RE_UPPER_LINE = re.compile(
+    r'(?m)^[ \t]*[A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9 \t,.:;!?«»"\'\-–—]*$'
+)
+
+
+
 # === стоп-слова из NLTK (русский) ===
 # ВАЖНО: один раз в окружении сделай:
 #   import nltk
 #   nltk.download('stopwords')
-STOPWORDS_RU: set[str] = set(stopwords.words('russian'))
+STOPWORDS_RU_ENG: set[str] = set(stopwords.words('russian')) | set(stopwords.words('english'))
 
 
 def clean_text(text: str) -> str:
-    # 1) нормализуем переводы строк
+    # нормализуем переводы строк
     text = text.replace('\r\n', '\n').replace('\r', '\n')
 
-    # 2) убираем управляющие/нечитаемые символы
+    # убираем управляющие/нечитаемые символы
     text = RE_CONTROL.sub('', text)
 
-    # 3) заменяем табы и пачки пробелов на один пробел
+    text = RE_TRASH.sub('\n', text)
+
+    # убираем номера глав (строки вида "1", "IV.", "ix" и т.п.)
+    text = RE_CHAPTER_HEADING.sub('', text)
+
+    # убираем строки-заголовки из одних ЗАГЛАВНЫХ
+    text = RE_UPPER_LINE.sub('', text)
+
+    # убираем ссылки типа [7], [12] и т.п.
+    text = RE_LINKS.sub(' ', text)
+
+    # заменяем табы и пачки пробелов на один пробел
     text = RE_SPACES.sub(' ', text)
 
-    # 4) нормализуем “ступеньки” из пустых строк
-    text = RE_MANY_EMPTY_LINES.sub('\n\n', text)
+    # нормализуем пустые строки (как мы обсуждали — тут лучше сделать 2+ -> 1)
+    text = RE_MANY_EMPTY_LINES.sub('\n', text)
 
-    # 5) финальный trim
     return text.strip()
 
 
@@ -87,9 +118,9 @@ def preprocess_text(
 
     result = ''.join(tokens_out)
 
-    # на всякий случай ещё раз подровняем пробелы и пустые строки
+    # # на всякий случай ещё раз подровняем пробелы и пустые строки
     result = RE_SPACES.sub(' ', result)
-    result = RE_MANY_EMPTY_LINES.sub('\n\n', result)
+    result = RE_MANY_EMPTY_LINES.sub('\n', result)
     return result.strip()
 
 
@@ -99,71 +130,95 @@ def build(files, target_kb, min_chunk_kb=4, rng=None):
     Размер куска пропорционален длине произведения.
     Для длинных произведений размер не меньше min_chunk_kb.
     Для коротких произведений берётся текст целиком.
+    
+    Работаем с символами (не байтами), чтобы не резать UTF-8 посередине.
     """
     if rng is None:
         rng = random
 
-    target_bytes = target_kb * 1024
-    min_chunk_bytes = min_chunk_kb * 1024
+    # Переводим target в символы (примерно: 1 кириллический символ ≈ 2 байта UTF-8)
+    # Но лучше работать напрямую с символами
+    target_chars = target_kb * 512  # примерная оценка для кириллицы
+    min_chunk_chars = min_chunk_kb * 512
 
-    # все в байты перевел
-    byte_files = {name: text.encode("utf-8") for name, text in files.items()}
-
-    # длины произведений
-    lengths = {name: len(byte_text) for name, byte_text in byte_files.items()}
+    # длины произведений в символах
+    lengths = {name: len(text) for name, text in files.items()}
     total = sum(lengths.values())
 
-    # считаем пропорции
+    # считаем пропорции (сколько символов брать из каждого произведения)
     props = {}
     for name, L in lengths.items():
-        if L <= min_chunk_bytes:
+        if L <= min_chunk_chars:
             # короткое произведение — берём целиком
             size = L
         else:
             # доля
             prop = L / total
-
-            size = int(prop * target_bytes)
-            size = max(size, min_chunk_bytes)
+            size = int(prop * target_chars)
+            size = max(size, min_chunk_chars)
             size = min(size, int(L * 0.9))
 
         props[name] = size
 
-    # если сумма > target_bytes, то уменьшаем
+    # если сумма > target_chars, то уменьшаем
     sum_sizes = sum(props.values())
-    if sum_sizes > target_bytes:
-        ratio = target_bytes / sum_sizes
+    if sum_sizes > target_chars:
+        ratio = target_chars / sum_sizes
         for name, size in list(props.items()):
             L = lengths[name]
-            if L <= min_chunk_bytes:
+            if L <= min_chunk_chars:
                 # короткие тексты не трогаем
                 props[name] = L
             else:
                 new_size = int(size * ratio)
-                new_size = max(min_chunk_bytes, min(new_size, int(L * 0.9)))
+                new_size = max(min_chunk_chars, min(new_size, int(L * 0.9)))
                 props[name] = new_size
 
     output_chunks = []
-    for name, byte_text in byte_files.items():
-        L = len(byte_text)
+    for name, text in files.items():
+        L = len(text)
         need = props[name]
 
         if need >= L:
-            chunk = files[name].strip()
+            chunk = text.strip()
         else:
-            # выбираем случайную стартовую позицию
+            # выбираем случайную стартовую позицию (в символах)
             start = rng.randint(0, L - need)
-            sub = byte_text[start:start+need].decode("utf-8", errors="ignore")
+            sub = text[start:start + need]
 
-            # перенос начала до ближайшего абзаца
-            idx = sub.find("\n\n")
-            if idx != -1:
-                sub = sub[idx+2:]
+            # обрезаем начало до ближайшего переноса строки (начало абзаца/предложения)
+            first_newline = sub.find("\n")
+            if first_newline != -1 and first_newline < len(sub) // 4:
+                sub = sub[first_newline + 1:]
+
+            # обрезаем конец до ближайшего переноса строки (конец абзаца/предложения)
+            last_newline = sub.rfind("\n")
+            if last_newline != -1 and last_newline > len(sub) * 3 // 4:
+                sub = sub[:last_newline]
+
+            # если не нашли переносы, пробуем обрезать по точке/восклицательному/вопросительному
+            if first_newline == -1:
+                for sep in ". ", "! ", "? ":
+                    idx = sub.find(sep)
+                    if idx != -1 and idx < len(sub) // 4:
+                        sub = sub[idx + 2:]
+                        break
+
+            if last_newline == -1:
+                for sep in ". ", "! ", "? ":
+                    idx = sub.rfind(sep)
+                    if idx != -1 and idx > len(sub) * 3 // 4:
+                        sub = sub[:idx + 1]
+                        break
+
             chunk = sub.strip()
 
         output_chunks.append(chunk)
 
-    return "\n\n".join(output_chunks)
+    result = "\n\n".join(output_chunks)
+    # нормализуем пустые строки
+    result = RE_MANY_EMPTY_LINES.sub("\n\n", result)
+    return result.strip()
 
 
 def process(
@@ -186,7 +241,7 @@ def process(
     base_processed_fold.mkdir(parents=True, exist_ok=True)
 
     # подготавливаем сет стоп-слов, если нужно 
-    stopwords_set: set[str] | None = STOPWORDS_RU if remove_stopwords else None
+    stopwords_set: set[str] | None = STOPWORDS_RU_ENG if remove_stopwords else None
 
     # читаем сырые тексты
     list_txt_files = list(raw_fold.glob('*.txt'))
@@ -270,6 +325,8 @@ def process(
     return train_path, test_path, meta
 
 
+
+
 # ===== Запуск 8 конфигураций =====
 
 author = "Pasternak"
@@ -302,3 +359,5 @@ for cfg in configs:
         min_chunk_kb=4,
         **cfg,
     )
+
+
