@@ -22,8 +22,8 @@ RE_CONTROL = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\uFFFD]')
 # несколько пробелов/табов подряд -> один пробел
 RE_SPACES = re.compile(r'[ \t]+')
 
-# 3+ пустых строк подряд -> 2 (нормализуем “лестницу” из пустых строк)
-RE_MANY_EMPTY_LINES = re.compile(r'\n[ \t]*\n[ \t]*\n+')
+# 2+ пустых строк подряд -> 1 (нормализуем “лестницу” из пустых строк)
+RE_MANY_EMPTY_LINES = re.compile(r'\n[ \t]*\n+')
 
 # слова / пробелы / пунктуация
 TOKEN_RE = re.compile(r'(\w+|\s+|[^\w\s])', flags=re.UNICODE)
@@ -74,7 +74,7 @@ def clean_text(text: str) -> str:
     # заменяем табы и пачки пробелов на один пробел
     text = RE_SPACES.sub(' ', text)
 
-    # нормализуем пустые строки (как мы обсуждали — тут лучше сделать 2+ -> 1)
+    # нормализуем пустые строки
     text = RE_MANY_EMPTY_LINES.sub('\n', text)
 
     return text.strip()
@@ -96,7 +96,6 @@ def preprocess_text(
         text = text.lower()
 
     if not remove_punct and not remove_stopwords:
-        # ничего сложного не делаем
         return text
 
     if remove_stopwords and stopwords_set is None:
@@ -247,7 +246,7 @@ def build(
 
     result = "\n\n".join(output_chunks)
     # нормализуем пустые строки
-    result = RE_MANY_EMPTY_LINES.sub("\n\n", result)
+    result = RE_MANY_EMPTY_LINES.sub("\n", result)
     return result.strip()
 
 
@@ -274,10 +273,10 @@ def process(
     stopwords_set: set[str] | None = STOPWORDS_RU_ENG if remove_stopwords else None
 
     # читаем сырые тексты
-    list_txt_files = list(raw_fold.glob('*.txt'))
+    list_txt_files = sorted(raw_fold.glob('*.txt'), key=lambda x: x.stem) # Сортируем по алфавиту
     raw_txt_files = {p.stem: p.read_text(encoding='utf-8') for p in list_txt_files}
 
-    # проверка кол-ва файлов — тут у тебя была ошибка (txt_files ещё нет)
+    # проверка кол-ва файлов
     if len(raw_txt_files) < 2:
         raise ValueError(f"Нужно хотя бы 2 произведения, найдено {len(raw_txt_files)}")
 
@@ -309,7 +308,8 @@ def process(
     titles = list(txt_files.keys())
     rng.shuffle(titles)
 
-    split_point = len(titles) * 2 // 3  # 2/3 произведений кидаем в train, чтоб он был разнообразнее
+    # 2/3 произведений кидаем в train, чтоб он был разнообразнее, также в некоторых случаях берем по 1/2 из-за целочисленного деления 
+    split_point = len(titles) * 2 // 3
     train_titles = titles[:split_point]
     test_titles  = titles[split_point:]
 
@@ -353,41 +353,3 @@ def process(
     print(f"В train попали: {train_titles}")
     print(f"В test: {test_titles}")
     return train_path, test_path, meta
-
-
-
-
-# ===== Запуск 8 конфигураций =====
-
-author = "Gorky"
-
-configs = [
-    # Without punctuation, without stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=True,  remove_stopwords=True),
-    # Without punctuation, with stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=True,  remove_stopwords=False),
-    # Without punctuation, without stop-words, with capital letters
-    dict(lowercase=False, remove_punct=True,  remove_stopwords=True),
-    # Without punctuation, with stop-words, with capital letters
-    dict(lowercase=False, remove_punct=True,  remove_stopwords=False),
-    # With punctuation, without stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=False, remove_stopwords=True),
-    # With punctuation, without stop-words, with capital letters
-    dict(lowercase=False, remove_punct=False, remove_stopwords=True),
-    # With punctuation, with stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=False, remove_stopwords=False),
-    # With punctuation, with stop-words, with capital letters
-    dict(lowercase=False, remove_punct=False, remove_stopwords=False),
-]
-
-for cfg in configs:
-    process(
-        author,
-        train_kb=128,
-        test_kb=128,
-        seed=2025,
-        min_chunk_kb=4,
-        **cfg,
-    )
-
-
