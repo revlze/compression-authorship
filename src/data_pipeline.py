@@ -22,8 +22,8 @@ RE_CONTROL = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\uFFFD]')
 # несколько пробелов/табов подряд -> один пробел
 RE_SPACES = re.compile(r'[ \t]+')
 
-# 3+ пустых строк подряд -> 2 (нормализуем “лестницу” из пустых строк)
-RE_MANY_EMPTY_LINES = re.compile(r'\n[ \t]*\n[ \t]*\n+')
+# 2+ пустых строк подряд -> 1 (нормализуем “лестницу” из пустых строк)
+RE_MANY_EMPTY_LINES = re.compile(r'\n[ \t]*\n+')
 
 # слова / пробелы / пунктуация
 TOKEN_RE = re.compile(r'(\w+|\s+|[^\w\s])', flags=re.UNICODE)
@@ -37,8 +37,11 @@ RE_CHAPTER_HEADING = re.compile(
 # ссылки по типу [7], [2], также не лезем во внутрь слова, типо 'слово[7]слово' --- не матчится 'слово[7]' --- матчится
 RE_LINKS = re.compile(r'\[\d+\](?!\w)')
 
-# какой-то мусор "_____" и двойные тире "--"
-RE_TRASH = re.compile(r'_+|--')
+# какой-то мусор "_____" 
+RE_TRASH = re.compile(r'_+')
+
+# двойные тире "--"
+RE_TIRE = re.compile(r'--+')
 
 # примечания всякие "* дааддаа"
 RE_STAR_LINE = re.compile(r'(?m)^[ \t]*\*.*$')
@@ -60,7 +63,11 @@ def clean_text(text: str) -> str:
     # убираем управляющие/нечитаемые символы
     text = RE_CONTROL.sub('', text)
 
+    # убираем мусор
     text = RE_TRASH.sub('\n', text)
+
+    # нормализуем тире
+    text = RE_TIRE.sub('-', text)
 
     # убираем номера глав (строки вида "1", "IV.", "ix" и т.п.)
     text = RE_CHAPTER_HEADING.sub('', text)
@@ -74,7 +81,7 @@ def clean_text(text: str) -> str:
     # заменяем табы и пачки пробелов на один пробел
     text = RE_SPACES.sub(' ', text)
 
-    # нормализуем пустые строки (как мы обсуждали — тут лучше сделать 2+ -> 1)
+    # нормализуем пустые строки
     text = RE_MANY_EMPTY_LINES.sub('\n', text)
 
     return text.strip()
@@ -88,15 +95,11 @@ def preprocess_text(
     remove_stopwords: bool,
     stopwords_set: set[str] | None = None,
 ) -> str:
-    # базовая чистка
-    text = clean_text(text)
-
     # регистр
     if lowercase:
         text = text.lower()
 
     if not remove_punct and not remove_stopwords:
-        # ничего сложного не делаем
         return text
 
     if remove_stopwords and stopwords_set is None:
@@ -247,7 +250,7 @@ def build(
 
     result = "\n\n".join(output_chunks)
     # нормализуем пустые строки
-    result = RE_MANY_EMPTY_LINES.sub("\n\n", result)
+    result = RE_MANY_EMPTY_LINES.sub("\n", result)
     return result.strip()
 
 
@@ -270,26 +273,21 @@ def process(
 
     base_processed_fold.mkdir(parents=True, exist_ok=True)
 
-    # подготавливаем сет стоп-слов, если нужно 
+    # подготавливаем сет стоп-слов, если нужно
     stopwords_set: set[str] | None = STOPWORDS_RU_ENG if remove_stopwords else None
 
     # читаем сырые тексты
-    list_txt_files = list(raw_fold.glob('*.txt'))
+    list_txt_files = sorted(raw_fold.glob('*.txt'), key=lambda x: x.stem) # Сортируем по алфавиту
     raw_txt_files = {p.stem: p.read_text(encoding='utf-8') for p in list_txt_files}
 
-    # проверка кол-ва файлов — тут у тебя была ошибка (txt_files ещё нет)
+    # проверка кол-ва файлов
     if len(raw_txt_files) < 2:
         raise ValueError(f"Нужно хотя бы 2 произведения, найдено {len(raw_txt_files)}")
 
-    # применяем препроцессинг ко всем произведениям
+    # применяем только базовую очистку (clean_text) ко всем произведениям,
+    # чтобы выбор чанков был одинаковым для всех конфигураций
     txt_files = {
-        title: preprocess_text(
-            text,
-            lowercase=lowercase,
-            remove_punct=remove_punct,
-            remove_stopwords=remove_stopwords,
-            stopwords_set=stopwords_set,
-        )
+        title: clean_text(text)
         for title, text in raw_txt_files.items()
     }
 
@@ -309,16 +307,33 @@ def process(
     titles = list(txt_files.keys())
     rng.shuffle(titles)
 
-    split_point = len(titles) * 2 // 3  # 2/3 произведений кидаем в train, чтоб он был разнообразнее
+    # 2/3 произведений кидаем в train, чтоб он был разнообразнее, также в некоторых случаях берем по 1/2 из-за целочисленного деления
+    split_point = len(titles) * 2 // 3
     train_titles = titles[:split_point]
     test_titles  = titles[split_point:]
 
     train_files = {t: txt_files[t] for t in train_titles}
     test_files  = {t: txt_files[t] for t in test_titles}
 
-    # генерируем train/test
+    # генерируем train/test (на базе очищенных, но не препроцессированных текстов)
     train_text = build(train_files, train_kb, min_chunk_kb=min_chunk_kb, rng=rng)
     test_text  = build(test_files, test_kb, min_chunk_kb=min_chunk_kb, rng=rng)
+
+    # применяем препроцессинг (lowercase, remove_punct, remove_stopwords) ПОСЛЕ build
+    train_text = preprocess_text(
+        train_text,
+        lowercase=lowercase,
+        remove_punct=remove_punct,
+        remove_stopwords=remove_stopwords,
+        stopwords_set=stopwords_set,
+    )
+    test_text = preprocess_text(
+        test_text,
+        lowercase=lowercase,
+        remove_punct=remove_punct,
+        remove_stopwords=remove_stopwords,
+        stopwords_set=stopwords_set,
+    )
 
     # пути до train/test
     train_path = processed_fold / 'Train.txt'
@@ -353,41 +368,3 @@ def process(
     print(f"В train попали: {train_titles}")
     print(f"В test: {test_titles}")
     return train_path, test_path, meta
-
-
-
-
-# ===== Запуск 8 конфигураций =====
-
-author = "Gorky"
-
-configs = [
-    # Without punctuation, without stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=True,  remove_stopwords=True),
-    # Without punctuation, with stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=True,  remove_stopwords=False),
-    # Without punctuation, without stop-words, with capital letters
-    dict(lowercase=False, remove_punct=True,  remove_stopwords=True),
-    # Without punctuation, with stop-words, with capital letters
-    dict(lowercase=False, remove_punct=True,  remove_stopwords=False),
-    # With punctuation, without stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=False, remove_stopwords=True),
-    # With punctuation, without stop-words, with capital letters
-    dict(lowercase=False, remove_punct=False, remove_stopwords=True),
-    # With punctuation, with stop-words, without capital letters
-    dict(lowercase=True,  remove_punct=False, remove_stopwords=False),
-    # With punctuation, with stop-words, with capital letters
-    dict(lowercase=False, remove_punct=False, remove_stopwords=False),
-]
-
-for cfg in configs:
-    process(
-        author,
-        train_kb=128,
-        test_kb=128,
-        seed=2025,
-        min_chunk_kb=4,
-        **cfg,
-    )
-
-
