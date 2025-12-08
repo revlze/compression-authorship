@@ -37,8 +37,11 @@ RE_CHAPTER_HEADING = re.compile(
 # ссылки по типу [7], [2], также не лезем во внутрь слова, типо 'слово[7]слово' --- не матчится 'слово[7]' --- матчится
 RE_LINKS = re.compile(r'\[\d+\](?!\w)')
 
-# какой-то мусор "_____" и двойные тире "--"
-RE_TRASH = re.compile(r'_+|--')
+# какой-то мусор "_____" 
+RE_TRASH = re.compile(r'_+')
+
+# двойные тире "--"
+RE_TIRE = re.compile(r'--+')
 
 # примечания всякие "* дааддаа"
 RE_STAR_LINE = re.compile(r'(?m)^[ \t]*\*.*$')
@@ -60,7 +63,11 @@ def clean_text(text: str) -> str:
     # убираем управляющие/нечитаемые символы
     text = RE_CONTROL.sub('', text)
 
+    # убираем мусор
     text = RE_TRASH.sub('\n', text)
+
+    # нормализуем тире
+    text = RE_TIRE.sub('-', text)
 
     # убираем номера глав (строки вида "1", "IV.", "ix" и т.п.)
     text = RE_CHAPTER_HEADING.sub('', text)
@@ -88,9 +95,6 @@ def preprocess_text(
     remove_stopwords: bool,
     stopwords_set: set[str] | None = None,
 ) -> str:
-    # базовая чистка
-    text = clean_text(text)
-
     # регистр
     if lowercase:
         text = text.lower()
@@ -269,7 +273,7 @@ def process(
 
     base_processed_fold.mkdir(parents=True, exist_ok=True)
 
-    # подготавливаем сет стоп-слов, если нужно 
+    # подготавливаем сет стоп-слов, если нужно
     stopwords_set: set[str] | None = STOPWORDS_RU_ENG if remove_stopwords else None
 
     # читаем сырые тексты
@@ -280,15 +284,10 @@ def process(
     if len(raw_txt_files) < 2:
         raise ValueError(f"Нужно хотя бы 2 произведения, найдено {len(raw_txt_files)}")
 
-    # применяем препроцессинг ко всем произведениям
+    # применяем только базовую очистку (clean_text) ко всем произведениям,
+    # чтобы выбор чанков был одинаковым для всех конфигураций
     txt_files = {
-        title: preprocess_text(
-            text,
-            lowercase=lowercase,
-            remove_punct=remove_punct,
-            remove_stopwords=remove_stopwords,
-            stopwords_set=stopwords_set,
-        )
+        title: clean_text(text)
         for title, text in raw_txt_files.items()
     }
 
@@ -316,9 +315,25 @@ def process(
     train_files = {t: txt_files[t] for t in train_titles}
     test_files  = {t: txt_files[t] for t in test_titles}
 
-    # генерируем train/test
+    # генерируем train/test (на базе очищенных, но не препроцессированных текстов)
     train_text = build(train_files, train_kb, min_chunk_kb=min_chunk_kb, rng=rng)
     test_text  = build(test_files, test_kb, min_chunk_kb=min_chunk_kb, rng=rng)
+
+    # применяем препроцессинг (lowercase, remove_punct, remove_stopwords) ПОСЛЕ build
+    train_text = preprocess_text(
+        train_text,
+        lowercase=lowercase,
+        remove_punct=remove_punct,
+        remove_stopwords=remove_stopwords,
+        stopwords_set=stopwords_set,
+    )
+    test_text = preprocess_text(
+        test_text,
+        lowercase=lowercase,
+        remove_punct=remove_punct,
+        remove_stopwords=remove_stopwords,
+        stopwords_set=stopwords_set,
+    )
 
     # пути до train/test
     train_path = processed_fold / 'Train.txt'
