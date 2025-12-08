@@ -52,8 +52,9 @@ RE_UPPER_LINE = re.compile(
 )
 
 
-
-
+# исключения для произведений. их не берем.
+exceptions_txt = ['Собачье сердце', 'Двенадцать стульев', 'Золотой теленок', 'Мертвое озеро', 'Три страны света']
+exceptions_txt = set(map(str.lower, exceptions_txt))
 
 
 def clean_text(text: str) -> str:
@@ -278,7 +279,7 @@ def process(
 
     # читаем сырые тексты
     list_txt_files = sorted(raw_fold.glob('*.txt'), key=lambda x: x.stem) # Сортируем по алфавиту
-    raw_txt_files = {p.stem: p.read_text(encoding='utf-8') for p in list_txt_files}
+    raw_txt_files = {p.stem: p.read_text(encoding='utf-8') for p in list_txt_files if p.stem.lower() not in exceptions_txt}
 
     # проверка кол-ва файлов
     if len(raw_txt_files) < 2:
