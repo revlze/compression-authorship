@@ -1,2 +1,4 @@
-ntlk
+nltk
 numpy
+zstandard
+brotli
