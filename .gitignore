@@ -3,6 +3,8 @@ data/processed
 
 .vscode
 .continue
+AGENTS.md
+CLAUDE.md
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
