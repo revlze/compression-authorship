@@ -307,7 +307,7 @@ def process(
     titles = list(txt_files.keys())
     rng.shuffle(titles)
 
-    # 2/3 произведений кидаем в train, чтоб он был разнообразнее, также в некоторых случаях берем по 1/2 из-за целочисленного деления 
+    # 2/3 произведений кидаем в train, чтоб он был разнообразнее, также в некоторых случаях берем по 1/2 из-за целочисленного деления
     split_point = len(titles) * 2 // 3
     train_titles = titles[:split_point]
     test_titles  = titles[split_point:]
