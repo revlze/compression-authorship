@@ -83,7 +83,7 @@ def split_into_splines(authors: list[str], n_splines: int = 16):
             for i in range(n_splines):
                 size = base_size + (1 if i < remainder else 0)
                 spline_file = data_splines / f'{i}_spline.txt'
-                spline_file.write_text(text[start:start + size])
+                spline_file.write_text(text[start:start + size], encoding='utf-8')
                 start += size
             print(f"Слайсы сохранены в {data_splines}")
         print("==="*30)
