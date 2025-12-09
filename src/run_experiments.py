@@ -1,12 +1,12 @@
 from data_pipeline import process
 from pathlib import Path, PurePath
 
-def run_data_pipeline(train_kb: int = 128, test_kb: int = 128, min_chunk_kb: int = 4, seed: int = 2025):
+def run_data_pipeline(authors: list[str], train_kb: int = 128, test_kb: int = 128, min_chunk_kb: int = 4, seed: int = 2025):
     data_raw = Path('data/raw')
 
     print("==="*30)
     print("Генерация датасета")
-    authors = sorted([author.stem for author in data_raw.glob('*')]) # all authors in `data/raw/`
+    authors = sorted([(data_raw / author) for author in authors]) # type: ignore
     configs = [
         # Without punctuation, without stop-words, without capital letters
         dict(lowercase=True,  remove_punct=True,  remove_stopwords=True),
@@ -43,7 +43,7 @@ def run_data_pipeline(train_kb: int = 128, test_kb: int = 128, min_chunk_kb: int
     print("==="*30)
 
 
-def split_into_splines(n_splines: int = 16, n_first_authors: int|None = None):
+def split_into_splines(authors: list[str], n_splines: int = 16):
     """
     Делит файл на n равных частей и сохраняет эти части в папку к автору 
     data/processed/{author_name}/{*_*_*}/{count_of_splines}_splines/{num_of_spline}_spline.txt
@@ -55,18 +55,14 @@ def split_into_splines(n_splines: int = 16, n_first_authors: int|None = None):
     """
 
     print("==="*30)
-    print(f"Начинаю нарезать Test.txt на {n_splines} слайсов, у n={n_first_authors} штук первых авторов!")
+    print(f"Начинаю нарезать Test.txt на {n_splines} слайсов, у {authors}!")
     print("==="*30)
     if n_splines <= 0:
         raise ValueError(f"n_splines={n_splines} должно быть > 0")
     
     data_processed = Path('data/processed')
 
-    authors = sorted([author.stem for author in data_processed.glob('*')]) # all authors in `data/raw/`
-    if n_first_authors is None:
-        n_first_authors = len(authors)
-
-    for author in authors[:n_first_authors]:
+    for author in authors:
         print(f"Автор: {author}")
         available_cfgs_path = list((data_processed/author).glob("*")) 
         print(f'Существуют: {list(map(lambda x: x.stem, available_cfgs_path))}')
@@ -94,4 +90,4 @@ def split_into_splines(n_splines: int = 16, n_first_authors: int|None = None):
 
     print("==="*30)
 
-split_into_splines(n_splines=2, n_first_authors=1)
+# split_into_splines(['Bunin', 'Bulgakov'], n_splines=2)
