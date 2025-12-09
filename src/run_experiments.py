@@ -52,9 +52,13 @@ def split_into_splines(n_splines: int = 16, n_first_authors: int|None = None):
     :param int | None n_first_authors: кол-во авторов, которых возьмет алгоритм на обработку, defaults to None
     :raises ValueError: n_splines должно быть > 0
     :raises FileNotFoundError: Test.txt у каждого автора должен существовать
-    """    
+    """
+
+    print("==="*30)
+    print(f"Начинаю нарезать Test.txt на {n_splines} слайсов, у n={n_first_authors} штук первых авторов!")
+    print("==="*30)
     if n_splines <= 0:
-        raise ValueError("n_splines должно быть > 0")
+        raise ValueError(f"n_splines={n_splines} должно быть > 0")
     
     data_processed = Path('data/processed')
 
@@ -85,3 +89,9 @@ def split_into_splines(n_splines: int = 16, n_first_authors: int|None = None):
                 spline_file = data_splines / f'{i}_spline.txt'
                 spline_file.write_text(text[start:start + size])
                 start += size
+            print(f"Слайсы сохранены в {data_splines}")
+        print("==="*30)
+
+    print("==="*30)
+
+split_into_splines(n_splines=2, n_first_authors=1)
