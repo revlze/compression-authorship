@@ -31,3 +31,21 @@ def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int) -> in
     phi_T1T2 = compressor_func(train_path, test_path, lvl)
 
     return phi_T1T2 - phi_T1
+
+
+def phi_authors(compressor: str, authors_paths: dict, test_path: Path, lvl: int) -> dict:
+    """
+    Для одного слайса вычисляем условное phi со всеми авторами.
+
+    :param compressor: название функции-компрессора
+    :param authors_paths: словарь {author_name: path_to_train_text}
+    :param test_path: путь к тестовому слайсу
+    :param lvl: уровень сжатия
+    :return: dict: {author: phi}
+    """
+    result = {}
+    for author, train_path in authors_paths.items():
+        train_path = Path(train_path)
+        result[author] = phi(compressor, train_path, test_path, lvl)
+
+    return result
