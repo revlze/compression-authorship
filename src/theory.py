@@ -78,10 +78,10 @@ def build_table(authors: list[str],  preprocess_type: str, n_slices: int, compre
 
     for author in authors:
         author_dir = Path('data/processed') / author / preprocess_type
-        slices_dir = author_dir / f'{n_slices}_splines'
+        slices_dir = author_dir / f'{n_slices}_slices'
 
         for i in range(n_slices):
-            test_path = slices_dir / f'{i}_spline.txt'
+            test_path = slices_dir / f'{i}_slice.txt'
             if not test_path.exists():
                 raise FileNotFoundError(f'Слайс {i} у автора {author} не найден: {test_path}')
 
