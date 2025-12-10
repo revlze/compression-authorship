@@ -94,4 +94,23 @@ def build_table(authors: list[str],  preprocess_type: str, n_slices: int, compre
     return table
 
 
-# print(build_table(['Bulgakov', 'Bunin'], 'origcase_withpunct_withstop', 2, 'lzma', 3))
+def chi_square(table: pd.DataFrame):
+    """
+    Вычисляет хи квадрат для conf-matrix.
+
+    :param table: DataFrame со значениями a_{i,j}
+    :return: chi2_val
+    """
+    A = table.values.astype(float)
+    N = A.sum()
+
+    P = A / N
+
+    p_i = P.sum(axis=1).reshape(-1, 1)
+    p_j = P.sum(axis=0).reshape(1, -1)
+
+    expected = N * (p_i @ p_j)
+
+    chi2_val = ((A - expected)**2 / expected).sum()
+
+    return chi2_val
