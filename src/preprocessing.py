@@ -1,4 +1,4 @@
-from data_pipeline import process
+from .data_pipeline import process
 from pathlib import Path
 
 def run_data_pipeline(authors: list[str], train_kb: int = 128, test_kb: int = 128, min_chunk_kb: int = 4, seed: int = 2025):
@@ -6,7 +6,6 @@ def run_data_pipeline(authors: list[str], train_kb: int = 128, test_kb: int = 12
 
     print("==="*30)
     print("Генерация датасета")
-    # authors = sorted([(data_raw / author) for author in authors]) # type: ignore
     configs = [
         # Without punctuation, without stop-words, without capital letters
         dict(lowercase=True,  remove_punct=True,  remove_stopwords=True),
@@ -26,7 +25,7 @@ def run_data_pipeline(authors: list[str], train_kb: int = 128, test_kb: int = 12
         dict(lowercase=False, remove_punct=False, remove_stopwords=False),
     ]
 
-    for author in authors:
+    for author in sorted(authors):
         print(f'Для {author}!')
         for cfg in configs:
             process(
@@ -86,5 +85,3 @@ def split_into_slices(authors: list[str], n_slices: int = 16):
         print("==="*30)
 
     print("==="*30)
-
-# split_into_slices(['Bunin', 'Bulgakov'], n_slices=2)
