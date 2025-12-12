@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int) -> int:
+def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int, phi_T1_cache: dict, author: str) -> int:
     '''
     Вычисляем phi(T2/T1) = phi(T1T2) - phi(T1).
 
@@ -14,6 +14,8 @@ def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int) -> in
     :param train_path: путь к файлу автора 1 (обучающий текст)
     :param test_path: путь к файлу автора 2 (тестовый слайс)
     :param lvl: уровень сжатия
+    :param phi_T1_cache: сохраненные длины обуч. текстов
+    :param author: фамилия автора
     :return: значение phi
     '''
     compressors_dict = {
@@ -31,7 +33,11 @@ def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int) -> in
     
     compressor_func = compressors_dict[compressor]
 
-    phi_T1  = compressor_func(train_path, None, lvl)
+    if author in phi_T1_cache:
+        phi_T1 = phi_T1_cache[author]
+    else:
+        phi_T1 = compressor_func(train_path, None, lvl)
+        phi_T1_cache[author] = phi_T1
 
     if test_path is None:
         return phi_T1
@@ -40,7 +46,7 @@ def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int) -> in
     return phi_T1T2 - phi_T1
 
 
-def phi_authors(compressor: str, authors_paths: dict, test_path: Path, lvl: int) -> dict:
+def phi_authors(compressor: str, authors_paths: dict, test_path: Path, lvl: int, phi_T1_cache: dict) -> dict:
     '''
     Для одного слайса вычисляем условное phi со всеми авторами.
 
@@ -48,12 +54,13 @@ def phi_authors(compressor: str, authors_paths: dict, test_path: Path, lvl: int)
     :param authors_paths: словарь {author_name: path_to_train_text}
     :param test_path: путь к тестовому слайсу
     :param lvl: уровень сжатия
+    :param phi_T1_cache: сохраненные длины обуч. текстов
     :return: dict: {author: phi}
     '''
     result = {}
     for author, train_path in authors_paths.items():
         train_path = Path(train_path)
-        result[author] = phi(compressor, train_path, test_path, lvl)
+        result[author] = phi(compressor, train_path, test_path, lvl, phi_T1_cache, author)
 
     return result
 
@@ -69,68 +76,35 @@ def build_table(authors: list[str],  preprocess_type: str, n_slices: int, compre
     :param compressor: название функции-компрессора
     :param lvl: уровень сжатия
     :return: pd.DataFrame, таблица ближайших авторов
-    :raises FileNotFoundError: если отсутствуют необходимые файлы данных
-    :raises ValueError: если список авторов пуст или n_slices <= 0
     '''
-    # Валидация входных параметров
-    if not authors:
-        raise ValueError("Список авторов не может быть пустым")
-    if n_slices <= 0:
-        raise ValueError(f"n_slices должно быть > 0, получено: {n_slices}")
-
-    base_dir = Path('data/processed')
-    if not base_dir.exists():
-        raise FileNotFoundError(
-            f"Директория {base_dir} не существует. "
-            "Сначала запустите run_data_pipeline() для генерации данных."
-        )
-
-    # Проверяем наличие всех необходимых файлов ДО начала вычислений
     authors_paths = {}
-    missing_files = []
+    phi_T1_cache = {}
 
     for author in authors:
-        author_dir = base_dir / author / preprocess_type
+        author_dir = Path('data/processed') / author / preprocess_type
         train_path = author_dir / 'Train.txt'
-        slices_dir = author_dir / f'{n_slices}_slices'
 
-        # Проверяем Train.txt
         if not train_path.exists():
-            missing_files.append(f"Train: {train_path}")
-            continue
-
-        # Проверяем директорию со слайсами
-        if not slices_dir.exists():
-            missing_files.append(f"Slices dir: {slices_dir}")
-            continue
-
-        # Проверяем все слайсы
-        for i in range(n_slices):
-            slice_path = slices_dir / f'{i}_slice.txt'
-            if not slice_path.exists():
-                missing_files.append(f"Slice {i}: {slice_path}")
+            raise FileNotFoundError(f'Train не найден: {train_path}, проверьте фамилию автора')
 
         authors_paths[author] = train_path
+        phi_T1_cache[author] = phi(compressor, train_path, None, lvl, phi_T1_cache, author)
 
-    if missing_files:
-        missing_str = '\n  - '.join(missing_files[:10])  # Показываем первые 10
-        extra = f"\n  ... и ещё {len(missing_files) - 10} файлов" if len(missing_files) > 10 else ""
-        raise FileNotFoundError(
-            f"Отсутствуют необходимые файлы:\n  - {missing_str}{extra}\n\n"
-            "Запустите run_data_pipeline() и split_into_slices() для генерации данных."
-        )
-
-    # Строим confusion matrix
     table = pd.DataFrame(0, index=authors, columns=authors)
 
     for author in authors:
-        author_dir = base_dir / author / preprocess_type
+        author_dir = Path('data/processed') / author / preprocess_type
         slices_dir = author_dir / f'{n_slices}_slices'
 
         for i in range(n_slices):
             test_path = slices_dir / f'{i}_slice.txt'
-            phi_vals = phi_authors(compressor, authors_paths, test_path, lvl)
+            if not test_path.exists():
+                raise FileNotFoundError(f'Слайс {i} у автора {author} не найден: {test_path}')
+
+            phi_vals = phi_authors(compressor, authors_paths, test_path, lvl, phi_T1_cache)
+
             predicted_author = min(phi_vals, key=phi_vals.get)
+
             table.loc[author, predicted_author] += 1
 
     return table
@@ -158,17 +132,6 @@ def chi_square(table: pd.DataFrame) -> float:
 
     # Ожидаемые частоты: E_{ij} = (row_sum_i * col_sum_j) / N
     expected = (row_sums @ col_sums) / N
-
-    # Предупреждение если есть малые ожидаемые значения (< 5)
-    # Это стандартное условие применимости χ² теста
-    small_expected = (expected > 0) & (expected < 5)
-    if small_expected.any():
-        n_small = small_expected.sum()
-        warnings.warn(
-            f"χ² test may be unreliable: {n_small} cells have expected frequency < 5. "
-            "Consider using Fisher's exact test or pooling categories.",
-            UserWarning
-        )
 
     # Избегаем деления на ноль: учитываем только ячейки с E > 0
     mask = expected > 0
