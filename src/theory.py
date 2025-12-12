@@ -1,6 +1,10 @@
-from compressors import gzip_compressor, bzip2_compressor, lzma_compressor, zstd_compressor, brotli_compressor
+from .compressors import gzip_compressor, bzip2_compressor, lzma_compressor, zstd_compressor, brotli_compressor
+from .neural_method import llm_compress, pac_compressor
 from pathlib import Path
+import warnings
+import numpy as np
 import pandas as pd
+from scipy import stats
 
 def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int) -> int:
     '''
@@ -17,7 +21,9 @@ def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int) -> in
         'bzip2': bzip2_compressor,
         'lzma': lzma_compressor,
         'zstd': zstd_compressor,
-        'brotli': brotli_compressor
+        'brotli': brotli_compressor,
+        'paq': pac_compressor,
+        'llm': llm_compress,
     }
     
     if compressor not in compressors_dict:
@@ -63,40 +69,79 @@ def build_table(authors: list[str],  preprocess_type: str, n_slices: int, compre
     :param compressor: название функции-компрессора
     :param lvl: уровень сжатия
     :return: pd.DataFrame, таблица ближайших авторов
+    :raises FileNotFoundError: если отсутствуют необходимые файлы данных
+    :raises ValueError: если список авторов пуст или n_slices <= 0
     '''
-    authors_paths = {}
-    for author in authors:
-        author_dir = Path('data/processed') / author / preprocess_type
-        train_path = author_dir / 'Train.txt'
+    # Валидация входных параметров
+    if not authors:
+        raise ValueError("Список авторов не может быть пустым")
+    if n_slices <= 0:
+        raise ValueError(f"n_slices должно быть > 0, получено: {n_slices}")
 
+    base_dir = Path('data/processed')
+    if not base_dir.exists():
+        raise FileNotFoundError(
+            f"Директория {base_dir} не существует. "
+            "Сначала запустите run_data_pipeline() для генерации данных."
+        )
+
+    # Проверяем наличие всех необходимых файлов ДО начала вычислений
+    authors_paths = {}
+    missing_files = []
+
+    for author in authors:
+        author_dir = base_dir / author / preprocess_type
+        train_path = author_dir / 'Train.txt'
+        slices_dir = author_dir / f'{n_slices}_slices'
+
+        # Проверяем Train.txt
         if not train_path.exists():
-            raise FileNotFoundError(f'Train не найден: {train_path}, проверьте фамилию автора')
+            missing_files.append(f"Train: {train_path}")
+            continue
+
+        # Проверяем директорию со слайсами
+        if not slices_dir.exists():
+            missing_files.append(f"Slices dir: {slices_dir}")
+            continue
+
+        # Проверяем все слайсы
+        for i in range(n_slices):
+            slice_path = slices_dir / f'{i}_slice.txt'
+            if not slice_path.exists():
+                missing_files.append(f"Slice {i}: {slice_path}")
 
         authors_paths[author] = train_path
 
+    if missing_files:
+        missing_str = '\n  - '.join(missing_files[:10])  # Показываем первые 10
+        extra = f"\n  ... и ещё {len(missing_files) - 10} файлов" if len(missing_files) > 10 else ""
+        raise FileNotFoundError(
+            f"Отсутствуют необходимые файлы:\n  - {missing_str}{extra}\n\n"
+            "Запустите run_data_pipeline() и split_into_slices() для генерации данных."
+        )
+
+    # Строим confusion matrix
     table = pd.DataFrame(0, index=authors, columns=authors)
 
     for author in authors:
-        author_dir = Path('data/processed') / author / preprocess_type
+        author_dir = base_dir / author / preprocess_type
         slices_dir = author_dir / f'{n_slices}_slices'
 
         for i in range(n_slices):
             test_path = slices_dir / f'{i}_slice.txt'
-            if not test_path.exists():
-                raise FileNotFoundError(f'Слайс {i} у автора {author} не найден: {test_path}')
-
             phi_vals = phi_authors(compressor, authors_paths, test_path, lvl)
-
             predicted_author = min(phi_vals, key=phi_vals.get)
-
             table.loc[author, predicted_author] += 1
 
     return table
 
 
-def chi_square(table: pd.DataFrame):
+def chi_square(table: pd.DataFrame) -> float:
     """
     Вычисляет хи квадрат для conf-matrix.
+
+    Использует стандартную формулу χ² = Σ (O - E)² / E,
+    где O — наблюдаемые значения, E — ожидаемые.
 
     :param table: DataFrame со значениями a_{i,j}
     :return: chi2_val
@@ -104,13 +149,62 @@ def chi_square(table: pd.DataFrame):
     A = table.values.astype(float)
     N = A.sum()
 
-    P = A / N
+    if N == 0:
+        return 0.0
 
-    p_i = P.sum(axis=1).reshape(-1, 1)
-    p_j = P.sum(axis=0).reshape(1, -1)
+    # Вычисляем суммы по строкам и столбцам
+    row_sums = A.sum(axis=1, keepdims=True)
+    col_sums = A.sum(axis=0, keepdims=True)
 
-    expected = N * (p_i @ p_j)
+    # Ожидаемые частоты: E_{ij} = (row_sum_i * col_sum_j) / N
+    expected = (row_sums @ col_sums) / N
 
-    chi2_val = ((A - expected)**2 / expected).sum()
+    # Предупреждение если есть малые ожидаемые значения (< 5)
+    # Это стандартное условие применимости χ² теста
+    small_expected = (expected > 0) & (expected < 5)
+    if small_expected.any():
+        n_small = small_expected.sum()
+        warnings.warn(
+            f"χ² test may be unreliable: {n_small} cells have expected frequency < 5. "
+            "Consider using Fisher's exact test or pooling categories.",
+            UserWarning
+        )
 
-    return chi2_val
+    # Избегаем деления на ноль: учитываем только ячейки с E > 0
+    mask = expected > 0
+    chi2_val = np.sum(((A - expected) ** 2 / expected)[mask])
+
+    return float(chi2_val)
+
+
+def significance_level(table: pd.DataFrame) -> tuple[float, float, int]:
+    """
+    Вычисляет уровень значимости (p-value) для критерия χ².
+
+    H0: все данные подчиняются одному распределению (нет связи автор-предсказание)
+    H1: отвергаем H0 (есть статистически значимая связь)
+
+    :param table: DataFrame confusion matrix
+    :return: (chi2_val, p_value, degrees_of_freedom)
+    """
+    n_rows, n_cols = table.shape
+    df = (n_rows - 1) * (n_cols - 1)  # степени свободы
+
+    chi2_val = chi_square(table)
+
+    # p-value: вероятность получить χ² >= chi2_val при H0
+    p_value = 1 - stats.chi2.cdf(chi2_val, df)
+
+    return chi2_val, p_value, df
+
+
+def get_accuracy(table: pd.DataFrame) -> float:
+    """
+    Вычисляет точность классификации (доля правильных предсказаний).
+
+    :param table: DataFrame confusion matrix
+    :return: accuracy (0..1)
+    """
+    correct = table.values.diagonal().sum()
+    total = table.values.sum()
+    return correct / total if total > 0 else 0.0
