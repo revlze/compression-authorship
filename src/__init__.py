@@ -13,7 +13,7 @@ from .theory import phi, phi_authors, build_table, chi_square, significance_leve
 from .preprocessing import run_data_pipeline, split_into_slices
 from .neural_method import (
     llm_compress,
-    pac_compressor,
+    paq_compressor,
     ts_zip_compressor,
     clear_model_cache,
 )
@@ -27,7 +27,7 @@ __all__ = [
     'brotli_compressor',
     # Neural compressors
     'llm_compress',
-    'pac_compressor',
+    'paq_compressor',
     'ts_zip_compressor',
     'clear_model_cache',
     # Data pipeline
