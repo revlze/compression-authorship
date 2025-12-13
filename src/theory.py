@@ -1,5 +1,5 @@
 from .compressors import gzip_compressor, bzip2_compressor, lzma_compressor, zstd_compressor, brotli_compressor
-from .neural_method import llm_compress, pac_compressor
+from .neural_method import llm_compress, paq_compressor, ts_zip_compressor, nncp_compressor, cmix_compressor
 from pathlib import Path
 import warnings
 import numpy as np
@@ -24,8 +24,11 @@ def phi(compressor: str, train_path: Path, test_path: Path|None, lvl: int, phi_T
         'lzma': lzma_compressor,
         'zstd': zstd_compressor,
         'brotli': brotli_compressor,
-        'paq': pac_compressor,
+        'paq': paq_compressor,
         'llm': llm_compress,
+        'ts_zip': ts_zip_compressor,
+        'nncp': nncp_compressor,
+        'cmix': cmix_compressor,
     }
     
     if compressor not in compressors_dict:
