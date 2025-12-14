@@ -3,3 +3,15 @@ numpy
 zstandard
 brotli
 pandas
+scipy
+seaborn
+matplotlib
+
+# PAQ компрессор (требует Cython для сборки)
+# pip install Cython && pip install paq --no-build-isolation
+paq
+
+# Опциональные зависимости для нейросетевых методов (neural_method.py)
+# Раскомментируйте, если планируете использовать llm_compress или ts_zip_compressor
+# torch
+# transformers

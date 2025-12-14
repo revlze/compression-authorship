@@ -6,6 +6,7 @@ def run_data_pipeline(authors: list[str], train_kb: int = 128, test_kb: int = 12
 
     print("==="*30)
     print("Генерация датасета")
+
     configs = [
         # Without punctuation, without stop-words, without capital letters
         dict(lowercase=True,  remove_punct=True,  remove_stopwords=True),
