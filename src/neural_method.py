@@ -167,7 +167,7 @@ def nncp_compressor(INPUT_PATH_1: str | Path, INPUT_PATH_2: str | Path | None = 
 
     :param INPUT_PATH_1: Путь к первому файлу
     :param INPUT_PATH_2: Путь ко второму файлу или None
-    :param lvl: Уровень сжатия (размер модели): 1-small, 2-medium, 3-large
+    :param lvl: Уровень сжатия (профиль): 1=lstm_fast, 2=lstm, 3=default (transformer)
     :return: Длина сжатых данных в байтах
     """
     import tempfile
@@ -179,9 +179,10 @@ def nncp_compressor(INPUT_PATH_1: str | Path, INPUT_PATH_2: str | Path | None = 
             "и добавьте в PATH."
         )
 
-    # Маппинг уровня на размер модели NNCP
-    model_sizes = {1: 's', 2: 'm', 3: 'l'}
-    model_flag = model_sizes.get(lvl, 'l')
+    # Маппинг уровня на профиль NNCP
+    # Доступные профили: default, enwik8, enwik9, lstm, lstm_fast
+    profiles = {1: 'lstm_fast', 2: 'lstm', 3: 'default'}
+    profile = profiles.get(lvl, 'default')
 
     data = _merge(INPUT_PATH_1, INPUT_PATH_2)
 
@@ -192,8 +193,8 @@ def nncp_compressor(INPUT_PATH_1: str | Path, INPUT_PATH_2: str | Path | None = 
     tmp_out_path = tmp_in_path.with_suffix('.bin.nncp')
 
     try:
-        # nncp c -m <model> <input> <output> — сжатие
-        _run_subprocess(['nncp', 'c', '-m', model_flag, str(tmp_in_path), str(tmp_out_path)])
+        # nncp c --profile <profile> <input> <output> — сжатие
+        _run_subprocess(['nncp', '-q', '-p', profile, 'c', str(tmp_in_path), str(tmp_out_path)])
         compressed_size = tmp_out_path.stat().st_size
     finally:
         if tmp_in_path.exists():
