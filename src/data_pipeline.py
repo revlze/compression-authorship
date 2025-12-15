@@ -282,7 +282,7 @@ def process(
     raw_txt_files = {p.stem: p.read_text(encoding='utf-8') for p in list_txt_files}
 
     # проверка кол-ва файлов
-    if len(raw_txt_files) < 2 and author_name not in ['Ilf_and_Petrov_12_chairs','Ilf_and_Petrov_golden_calf','Bulgakov_experiment']:
+    if len(raw_txt_files) < 2 and author_name not in ['Ilf_and_Petrov_12_chairs','Ilf_and_Petrov_golden_calf','Bulgakov_experiment', 'Chukovsky_Tom', 'Engelhardt_Tom', 'Darouzes_Tom', 'Twain_machine', 'Twain_machine_google', 'Twain_machine_yandex']:
         raise ValueError(f"Нужно хотя бы 2 произведения, найдено {len(raw_txt_files)}")
 
 
@@ -312,8 +312,11 @@ def process(
     # 2/3 произведений кидаем в train, чтоб он был разнообразнее, также в некоторых случаях берем по 1/2 из-за целочисленного деления
     split_point = len(titles) * 2 // 3
 
-    if len(raw_txt_files) < 2 and author_name in ['Ilf_and_Petrov_12_chairs','Ilf_and_Petrov_golden_calf','Bulgakov_experiment']:
+    if len(raw_txt_files) < 2 and author_name in ['Ilf_and_Petrov_12_chairs','Ilf_and_Petrov_golden_calf','Bulgakov_experiment', 'Chukovsky_Tom', 'Engelhardt_Tom', 'Darouzes_Tom', 'Twain_machine', 'Twain_machine_google', 'Twain_machine_yandex']:
         split_point = 0
+    
+    if author_name in ['Chukovsky_Tom', 'Engelhardt_Tom', 'Darouzes_Tom']:
+        split_point = 1
 
     train_titles = titles[:split_point]
     test_titles  = titles[split_point:]

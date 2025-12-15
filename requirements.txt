@@ -6,7 +6,7 @@ pandas
 scipy
 seaborn
 matplotlib
-
+deep-translator
 # PAQ компрессор (требует Cython для сборки)
 # pip install Cython && pip install paq --no-build-isolation
 paq
