@@ -6,6 +6,7 @@ data/processed
 AGENTS.md
 CLAUDE.md
 *.pdf
+!docs/presentation.pdf
 example_table.jpg
 # Byte-compiled / optimized / DLL files
 __pycache__/
